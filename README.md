@@ -1,4 +1,4 @@
-```markdown
+
 # Multi-Cluster K3s + KWOK + Liqo Lab Environment
 
 An automated lab environment for testing **K3s**, **KWOK**, and **Liqo** multi-cluster scenarios, orchestrated with **Containerlab**.
