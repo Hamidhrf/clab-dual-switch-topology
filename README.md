@@ -1,136 +1,183 @@
+```markdown
+# Multi-Cluster K3s + KWOK + Liqo Lab Environment
 
-# Multi-Cluster K3s + KWOK + Liqo Environment
-
-This repository contains an automated lab environment for **K3s**, **KWOK**, and **Liqo**, orchestrated using **Containerlab**.  
+An automated lab environment for testing **K3s**, **KWOK**, and **Liqo** multi-cluster scenarios, orchestrated with **Containerlab**.
 
 ---
 
 ## Overview
 
-Each simulated **client node** runs:
--  A lightweight **K3s** control plane (standalone)
--  A **KWOK** controller (fake Kubernetes nodes)
--  **Liqo** for inter-cluster peering and offloading
--  Optional metrics-server and log output for diagnostics
+This lab simulates a multi-cluster Kubernetes environment where each client node runs:
 
-KWOK creates **fake worker nodes** so you can simulate scale without heavy CPU overhead.
+- **K3s** - Lightweight Kubernetes control plane (standalone mode)
+- **KWOK** - Kubernetes WithOut Kubelet (fake worker nodes for scale testing)
+- **Liqo** - Multi-cluster resource sharing and workload offloading
+- **Metrics Server** - Optional resource monitoring
+
+KWOK creates simulated worker nodes that appear as `Ready` in the cluster without consuming actual compute resources, enabling large-scale testing scenarios.
 
 ---
 
-##  Getting Started
+## Quick Start
 
-###  1. Prerequisites
-Install:
+### Prerequisites
+
+Install required dependencies:
+
 ```bash
+# Install Docker
 sudo apt install docker.io -y
+
+# Install Containerlab
 bash -c "$(curl -fsSL https://get.containerlab.dev)"
 
-
-Verify:
-
+# Verify installations
 containerlab version
 docker ps
+```
 
- 2. Deploy the lab
+### Deploy the Lab
 
-⚠️ Always use deploy.sh instead of containerlab deploy directly —
-it creates required directories and shared volumes automatically.
+**⚠️ Important:** Always use `deploy.sh` instead of `containerlab deploy` directly to ensure proper initialization.
 
+```bash
 ./deploy.sh deploy
+```
 
+This script automatically:
+- Creates subdirectories under `client-data/` for each client (client1–client10)
+- Generates shared configuration files (`peering-config.txt`, `peering-tokens.txt`)
+- Deploys the complete topology via Containerlab
 
-This script will:
+### Connect to a Client
 
-Create subfolders under client-data/ for each node (client1–client10)
+Each client runs an independent K3s cluster. To access a client's shell:
 
-Create shared files (peering-config.txt, peering-tokens.txt)
-
-Deploy the full topology with Containerlab
-
- 3. Connect to a client container
-
-Each client runs its own K3s cluster.
-To open an interactive shell:
-
+```bash
 ./deploy.sh connect 3
+```
 
+Inside the container:
 
-Then inside:
-
+```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 kubectl get nodes
+```
 
- 4. Check status or destroy
-# Show running nodes and links
+### Manage the Lab
+
+```bash
+# View cluster status
 ./deploy.sh status
 
-# Tear down the lab cleanly
+# Destroy the lab
 ./deploy.sh destroy
+```
 
- Internals — What Happens Inside Each Client
+---
 
-When a client container starts, it executes client-init.sh which:
+## Architecture
 
-Step	Action
- 1	Configures eth1 with static IP for inter-VLAN communication
- 2	Installs & launches K3s (standalone mode)
- 3	Installs KWOK from GitHub releases
- 4	Creates one fake node per client (Ready state)
- 5	Installs Liqo for multi-cluster peering
- 6	Exports kubeconfig and keeps container alive for observation
- Fake Node Configuration (KWOK)
+### Network Topology
 
-Each client creates one fake node named <hostname>-fake-node-1.
-Example specs:
+| Group | VLAN | CIDR | Gateway |
+|-------|------|------|---------|
+| Clients 1–5 | 10 | 192.168.10.0/24 | 192.168.10.1 |
+| Clients 6–10 | 20 | 192.168.20.0/24 | 192.168.20.1 |
 
-Property	Value
-CPU	24 cores
-Memory	32 GiB
-Pods capacity	200
-Architecture	amd64
-Kubelet version	fake
-Taints	kwok.x-k8s.io/node=fake:NoSchedule
-Annotation	kwok.x-k8s.io/node: fake (used by KWOK controller)
+- **eth0** - Docker management and internet connectivity
+- **eth1** - Inter-VLAN communication
 
-These nodes are simulated, so they appear as Ready but consume no actual compute resources — ideal for scaling experiments or scheduler testing.
+### Client Initialization
 
- Verification Commands
+When a client container starts, `client-init.sh` performs the following:
 
-Once deployed, you can verify each component:
+| Step | Action |
+|------|--------|
+| 1 | Configure eth1 with static IP for inter-VLAN communication |
+| 2 | Install and launch K3s in standalone mode |
+| 3 | Install KWOK controller from GitHub releases |
+| 4 | Create one simulated node per client (Ready state) |
+| 5 | Install Liqo for multi-cluster peering |
+| 6 | Export kubeconfig and keep container alive |
 
- K3s
+---
+
+## KWOK Fake Nodes
+
+Each client creates one simulated node: `<hostname>-fake-node-1`
+
+### Default Node Specifications
+
+| Property | Value |
+|----------|-------|
+| CPU | 24 cores |
+| Memory | 32 GiB |
+| Pod Capacity | 200 |
+| Architecture | amd64 |
+| Kubelet Version | fake |
+| Taints | `kwok.x-k8s.io/node=fake:NoSchedule` |
+| Annotation | `kwok.x-k8s.io/node: fake` |
+
+These nodes appear as `Ready` in `kubectl get nodes` but consume no actual compute resources.
+
+---
+
+## Verification
+
+Verify each component after deployment:
+
+### K3s Cluster
+
+```bash
 kubectl get nodes -o wide
+```
 
- KWOK
+### KWOK Nodes
+
+```bash
 kubectl get nodes | grep fake
+```
 
- Liqo
+### Liqo Status
+
+```bash
 liqoctl info
+```
 
- Metrics
+### Resource Metrics
+
+```bash
 kubectl top nodes
+```
 
-Group	VLAN	CIDR	Gateway
-Clients 1–5	10	192.168.10.0/24	192.168.10.1
-Clients 6–10	20	192.168.20.0/24	192.168.20.1
+---
 
-Each client uses eth0 for Docker/internet, and eth1 for inter-VLAN communication.
+## Customization
 
- Customization
+### Modify Fake Node Resources
 
-To change fake node resources, edit inside client-init.sh:
+Edit the resource specifications in `client-init.sh`:
 
+```yaml
 status:
   capacity:
     cpu: "24"
     memory: "32Gi"
     pods: "200"
+```
 
+### Add Multiple Fake Nodes
 
-You can also create multiple fake nodes per client by duplicating the YAML block with new names.
+Duplicate the YAML node definition block in `client-init.sh` with unique node names to create additional simulated nodes per client.
 
-Example Workflows
-Check all Liqo deployments
+---
+
+## Example Workflows
+
+### Check All Liqo Deployments
+
+```bash
 for i in {1..10}; do
   echo "== client$i =="
   docker exec clab-dual-switch-topology-client$i bash -lc '
@@ -138,7 +185,20 @@ for i in {1..10}; do
     liqoctl info || true
   '
 done
+```
 
-Cleanup everything
+### Complete Cleanup
+
+```bash
 ./deploy.sh destroy
 sudo rm -rf client-data/*
+```
+
+---
+
+##  Additional Resources
+
+- [K3s Documentation](https://docs.k3s.io/)
+- [KWOK Documentation](https://kwok.sigs.k8s.io/)
+- [Liqo Documentation](https://docs.liqo.io/)
+- [Containerlab Documentation](https://containerlab.dev/)
