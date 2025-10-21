@@ -1,0 +1,17 @@
+# Ignore runtime container data
+client-data/
+clab-*/
+shared/
+logs/
+*.log
+*.tmp
+*.bak
+
+# Ignore compiled caches or system junk
+__pycache__/
+*.swp
+*.lock
+*.pid
+
+# Ignore environment configs
+.env

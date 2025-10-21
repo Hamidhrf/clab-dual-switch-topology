@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Node
+metadata:
+  name: fake-node-1               
+  labels:
+    # Display a role in `kubectl get nodes` (ROLES column)
+    node-role.kubernetes.io/worker: ""
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+    type: kwok
+  annotations:
+    # Let KWOK manage this node (so it stays Ready via heartbeats)
+    kwok.x-k8s.io/node: "fake"
+    node.alpha.kubernetes.io/ttl: "0"
+ 
+    # So metrics-server can read simulated CPU/Mem for `kubectl top`
+    # IMPORTANT: put the actual node name in the path:
+    metrics.k8s.io/resource-metrics-path: "/metrics/nodes/fake-node-1/metrics/resource"
+spec:
+  # Keep real workloads off fake nodes (your fake pods can tolerate this)
+  taints:
+  - key: kwok.x-k8s.io/node
+    value: fake
+    effect: NoSchedule
+status:
+  # Whatever sizes you want the node to advertise
+  capacity:
+    cpu: "24"
+    memory: "32Gi"
+    pods: "200"
+  allocatable:
+    cpu: "24"
+    memory: "32Gi"
+    pods: "200"
+  nodeInfo:
+    architecture: amd64
+    kubeProxyVersion: fake
+    kubeletVersion: fake
+    operatingSystem: linux
