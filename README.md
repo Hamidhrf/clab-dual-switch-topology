@@ -1,29 +1,21 @@
+# Dual-Switch Topology: K3s + KWOK + Liqo Lab
 
-# Multi-Cluster K3s + KWOK + Liqo Lab Environment
-
-An automated lab environment for testing **K3s**, **KWOK**, and **Liqo** multi-cluster scenarios, orchestrated with **Containerlab**.
+A containerlab-based lab environment for testing **K3s**, **KWOK (fake nodes)**, and **Liqo** multi-cluster scenarios with automated setup scripts.
 
 ---
 
 ## Overview
 
-This lab simulates a multi-cluster Kubernetes environment where each client node runs:
-
-- **K3s** - Lightweight Kubernetes control plane (standalone mode)
-- **KWOK** - Kubernetes WithOut Kubelet (fake worker nodes for scale testing)
-- **Liqo** - Multi-cluster resource sharing and workload offloading
-- **Metrics Server** - Optional resource monitoring
-
-KWOK creates simulated worker nodes that appear as `Ready` in the cluster without consuming actual compute resources, enabling large-scale testing scenarios.
+This lab provides:
+- **K3s** lightweight Kubernetes cluster
+- **KWOK** simulated worker nodes (scale testing without resources)
+- **Liqo** multi-cluster resource sharing
+- **Metrics Server** with support for KWOK nodes
+- **Automated setup & cleanup scripts**
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-Install required dependencies:
-
+## Prerequisites
 ```bash
 # Install Docker
 sudo apt install docker.io -y
@@ -36,169 +28,149 @@ containerlab version
 docker ps
 ```
 
-### Deploy the Lab
+---
 
-**⚠️ Important:** Always use `deploy.sh` instead of `containerlab deploy` directly to ensure proper initialization.
+## Quick Start
 
+### 1. Deploy the Topology
 ```bash
-./deploy.sh deploy
+# Deploy containerlab topology
+sudo containerlab deploy -t dual-switch-topology.yml
+
+# Verify containers are running
+sudo containerlab inspect
 ```
 
-This script automatically:
-- Creates subdirectories under `client-data/` for each client (client1–client10)
-- Generates shared configuration files (`peering-config.txt`, `peering-tokens.txt`)
-- Deploys the complete topology via Containerlab
+### 2. Run the Setup Script
 
-### Connect to a Client
-
-Each client runs an independent K3s cluster. To access a client's shell:
-
+The main setup script installs K3s, KWOK, creates 3 fake nodes and 30 test pods:
 ```bash
-./deploy.sh connect 3
+chmod +x k3s-kwok-setup.sh
+./k3s-kwok-setup.sh
 ```
 
-Inside the container:
+**What it does:**
+- Installs K3s (if not present)
+- Patches metrics-server with `--kubelet-insecure-tls` flag
+- Installs KWOK controller
+- Creates 3 fake worker nodes
+- Adds node addresses for metrics-server scraping
+- Creates 30 test pods across fake nodes
+- Installs Liqo
 
+### 3. Verify the Setup
 ```bash
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-kubectl get nodes
-```
+# Access the container
+sudo docker exec -it clab-dual-switch-topology-client1 bash
 
-### Manage the Lab
+# Inside container - check nodes
+k3s kubectl get nodes
 
-```bash
-# View cluster status
-./deploy.sh status
+# Check pods
+k3s kubectl get pods -n test-workloads
 
-# Destroy the lab
-./deploy.sh destroy
+# Check node metrics 
+k3s kubectl top nodes
+
+# Check pod metrics (requires kwok-exporter)
+k3s kubectl top pods -n test-workloads
 ```
 
 ---
 
 ## Architecture
 
-### Network Topology
+### Network Setup
 
-| Group | VLAN | CIDR | Gateway |
-|-------|------|------|---------|
-| Clients 1–5 | 10 | 192.168.10.0/24 | 192.168.10.1 |
-| Clients 6–10 | 20 | 192.168.20.0/24 | 192.168.20.1 |
+| Component | IP | Notes |
+|-----------|----|----|
+| client1 (real node) | 172.20.20.41 | K3s control plane |
+| client1-fake-node-1 | 172.20.20.41 | KWOK simulated node |
+| client1-fake-node-2 | 172.20.20.41 | KWOK simulated node |
+| client1-fake-node-3 | 172.20.20.41 | KWOK simulated node |
 
-- **eth0** - Docker management and internet connectivity
-- **eth1** - Inter-VLAN communication
+All nodes share the same IP (real node's IP) because fake nodes don't run real kubelets.
 
-### Client Initialization
-
-When a client container starts, `client-init.sh` performs the following:
-
-| Step | Action |
-|------|--------|
-| 1 | Configure eth1 with static IP for inter-VLAN communication |
-| 2 | Install and launch K3s in standalone mode |
-| 3 | Install KWOK controller from GitHub releases |
-| 4 | Create one simulated node per client (Ready state) |
-| 5 | Install Liqo for multi-cluster peering |
-| 6 | Export kubeconfig and keep container alive |
-
----
-
-## KWOK Fake Nodes
-
-Each client creates one simulated node: `<hostname>-fake-node-1`
-
-### Default Node Specifications
+### KWOK Node Specifications
 
 | Property | Value |
 |----------|-------|
-| CPU | 24 cores |
-| Memory | 32 GiB |
-| Pod Capacity | 200 |
+| CPU | 8 cores |
+| Memory | 16 GiB |
+| Pod Capacity | 110 |
 | Architecture | amd64 |
 | Kubelet Version | fake |
 | Taints | `kwok.x-k8s.io/node=fake:NoSchedule` |
-| Annotation | `kwok.x-k8s.io/node: fake` |
-
-These nodes appear as `Ready` in `kubectl get nodes` but consume no actual compute resources.
 
 ---
 
-## Verification
+## Cleanup
 
-Verify each component after deployment:
-
-### K3s Cluster
-
+Use the cleanup script to remove resources:
 ```bash
-kubectl get nodes -o wide
+chmod +x k3s-kwok-cleanup.sh
+./k3s-kwok-cleanup.sh
 ```
 
-### KWOK Nodes
-
-```bash
-kubectl get nodes | grep fake
-```
-
-### Liqo Status
-
-```bash
-liqoctl info
-```
-
-### Resource Metrics
-
-```bash
-kubectl top nodes
-```
+**Cleanup Levels:**
+- **Level 1**: Remove pods + fake nodes only (keeps K3s/KWOK/Liqo)
+- **Level 2**: Complete cleanup (removes everything including K3s)
 
 ---
 
-## Customization
+## Scripts Reference
 
-### Modify Fake Node Resources
+### k3s-kwok-setup.sh
 
-Edit the resource specifications in `client-init.sh`:
+Main setup script that configures the entire environment.
 
-```yaml
-status:
-  capacity:
-    cpu: "24"
-    memory: "32Gi"
-    pods: "200"
-```
+**Key Features:**
+- Automated K3s installation
+- Metrics-server TLS configuration
+- KWOK controller deployment
+- Fake node creation with addresses
+- Test pod deployment
 
-### Add Multiple Fake Nodes
+### k3s-kwok-cleanup.sh
 
-Duplicate the YAML node definition block in `client-init.sh` with unique node names to create additional simulated nodes per client.
+Interactive cleanup script with two levels.
 
----
-
-## Example Workflows
-
-### Check All Liqo Deployments
-
+**Usage:**
 ```bash
-for i in {1..10}; do
-  echo "== client$i =="
-  docker exec clab-dual-switch-topology-client$i bash -lc '
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    liqoctl info || true
-  '
-done
-```
-
-### Complete Cleanup
-
-```bash
-./deploy.sh destroy
-sudo rm -rf client-data/*
+./k3s-kwok-cleanup.sh
+# Choose: 1 (partial) or 2 (full cleanup)
 ```
 
 ---
 
-##  Additional Resources
 
-- [K3s Documentation](https://docs.k3s.io/)
-- [KWOK Documentation](https://kwok.sigs.k8s.io/)
-- [Liqo Documentation](https://docs.liqo.io/)
-- [Containerlab Documentation](https://containerlab.dev/)
+## Troubleshooting
+
+### K3s Not Running
+```bash
+# Inside container
+/usr/local/bin/restart-k3s.sh
+```
+
+### Metrics Server Issues
+```bash
+# Check metrics-server logs
+k3s kubectl -n kube-system logs deploy/metrics-server --tail=20
+
+# Verify TLS flag is present
+k3s kubectl -n kube-system get deploy metrics-server -o yaml | grep kubelet-insecure-tls
+```
+
+### Fake Nodes Show Unknown Metrics
+```bash
+# Verify node addresses
+k3s kubectl get nodes -o wide
+
+# Check if addresses are set
+k3s kubectl get node client1-fake-node-1 -o jsonpath='{.status.addresses}'
+
+# Re-patch addresses if needed
+HOST_IP=$(hostname -I | grep -oE "172\.[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+k3s kubectl patch node client1-fake-node-1 --subresource=status --type=json -p="[{\"op\":\"add\",\"path\":\"/status/addresses\",\"value\":[{\"type\":\"InternalIP\",\"address\":\"$HOST_IP\"},{\"type\":\"Hostname\",\"address\":\"client1-fake-node-1\"}]}]"
+```
+
